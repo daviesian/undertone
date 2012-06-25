@@ -110,6 +110,30 @@
                              (swap! current-notes #(disj % note)))
           ::note-offs)
 
+;; INSTS
+
+(definst my-kick
+  [freq       {:default 50 :min 40 :max 140 :step 1}
+   env-ratio  {:default 3 :min 1.2 :max 8.0 :step 0.1}
+   freq-decay {:default 0.02 :min 0.001 :max 1.0 :step 0.001}
+   amp-decay  {:default 0.5 :min 0.001 :max 1.0 :step 0.001}
+   vol        {:default 1}]
+  (let [fenv (* (env-gen (envelope [env-ratio 1] [freq-decay] :exp)) freq)
+        aenv (env-gen (perc 0.005 amp-decay) :action FREE)]
+    (* vol (sin-osc fenv (* 0.5 Math/PI)) aenv)))
+
+
+(defsynth my-overpad
+  [note 60 amp 0.7 attack 0.001 release 2]
+  (let [freq  (midicps note)
+        env   (env-gen (perc attack release) :action FREE)
+        f-env (+ freq (* 3 freq (env-gen (perc 0.012 (- release 0.1)))))
+        bfreq (/ freq 2)
+        sig   (apply +
+                     (concat (* 0.7 (sin-osc [bfreq (* 0.99 bfreq)]))
+                             (lpf (saw [freq (* freq 1.01)]) f-env)))
+        audio (* amp env sig)]
+    (out 0 (pan2  audio))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -117,8 +141,8 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn lookup-if-sym [s]
-  (if (symbol? s) (eval s) s))
+(defn lookup-if-var [s]
+  (if (var? s) (deref s) s))
 
 (defonce my-rand-gen (Random. (now)))
 
@@ -130,8 +154,14 @@
 (defn infinite-rand-chain [variations]
   (apply concat (repeatedly #(my-rand-nth variations))))
 
-(def infinite-drum-track
-  (cycle [1 nil nil nil]))
+(defn funky-sequence []
+  [[:kick :hat]
+   :hat
+   :hat
+   :hat])
+
+(defn infinite-drum-track-generator []
+  (apply concat (repeatedly #'funky-sequence)))
 
 (def pad-timing-variations
   (let [- nil
@@ -141,46 +171,85 @@
     [[ | - - | - - + - - + - - * - - * - - | - - | - - | - | - + - + - ]
      [ | - - | - - + - - + - - * - - * - - | - - | - - | - - | - - + - ]]))
 
+(def chord-variations
+  {:b3 {0 (map (fn [n] {:note n :release 3}) (chord :b3 :minor))
+        1 (map (fn [n] {:note n :release 1}) (chord :b3 :sus2))
+        2 (map (fn [n] {:note n :release 1}) (chord :b3 :sus4))}
+   :d4 {0 (map (fn [n] {:note n :release 13}) (chord :d4 :major))
+        1 (map (fn [n] {:note n :release 1}) (chord :d4 :sus2))
+        2 (map (fn [n] {:note n :release 2}) (chord :d4 :sus2))}})
+
 (def infinite-chord-track
   (let [bar-len 32]
-    (cycle (concat (repeat bar-len [(chord :b3 :minor)
-                                    (chord :b3 :sus2)
-                                    (chord :b3 :sus4)])
-                   (repeat bar-len [(chord :a3 :major)
-                                    (chord :a3 :major)
-                                    (chord :a3 :major)])))))
+    (cycle (concat (repeat bar-len :b3)
+                   (repeat bar-len :d4)))))
 
-(def infinite-pad-track
-  (map (fn [[chord-vars chord-var-idx]]
-         (when chord-var-idx (nth chord-vars chord-var-idx)))
-       (partition 2 (interleave infinite-chord-track (infinite-rand-chain pad-timing-variations)))))
+(defn clever-dot-product-thing [s indices variations]
+  (map (fn [d i]
+         (when i (get-in variations [d i])))
+       s indices))
 
+(defn infinite-pad-track-generator []
+  (clever-dot-product-thing infinite-chord-track (infinite-rand-chain pad-timing-variations) chord-variations))
 
 (play-piece (* 4 130) piece (+ (now) 100))
 
+(defn play-drum [n]
+  (cond
+    (= n :kick) (my-kick :vol 8)
+    (= n :hat) (closed-hat)
+    (= n :snare) (do
+                   (sample-player (sample (freesound-path 26903))))
+    :else (println "urgh" n)))
+
+(defn play-inst [player notes]
+  (when notes
+    (if (sequential? notes)
+      (doseq [d notes]
+        (player d))
+      (player notes))))
+
 (def piece
-  {:insts {:drum (fn [x] (when x (closed-hat)))
-           :pad (fn [n] (when n
-                         (if (seq? n)
-                           (doseq [note n]
-                             (overpad note))
-                           (overpad n))))}
-   :tracks [[:pad  infinite-pad-track]
-            [:drum infinite-drum-track]]})
+  {:insts {:drum #(play-inst play-drum %)
+           :pad #(play-inst my-overpad %)
+           }
+   :tracks [[:pad foobar;; infinite-pad-track-generator]
+            [:drum infinite-drum-track-generator]]})
+
 
 (defn play-piece [bpm piece start-time]
-  (let [beat-interval (/ 60000 bpm)
+  (let [beat-interval  (/ 60000 bpm)
         next-beat-time (+ start-time beat-interval)
-        tracks (:tracks piece)
-        insts (:insts piece)]
+        tracks         (:tracks piece)
+        insts          (:insts piece)]
     (at start-time
       (doseq [t tracks]
-          (let [i-fn (insts (first t))
-                [note & rest-notes] (lookup-if-sym (second t))]
-            (when i-fn
-              (i-fn note)))))
+        (let [i-fn (insts (first t))
+              f (second t)
+              note (first ((second t)))]
+          (i-fn note))))
     (let [new-tracks (for [[i ns] tracks]
-                       [i (rest (lookup-if-sym ns))])]
+                       [i #(rest (ns))])]
       (apply-at next-beat-time play-piece [bpm
                                            (assoc piece :tracks new-tracks)
                                            next-beat-time]))))
+
+
+(def next-piece [5])
+
+(defn mk-stream []
+  ())
+
+(print-next (cycle next-piece))
+
+(defn print-next
+  ([] (print-next next-piece))
+  ([s]
+     (if (seq s)
+       (let [f (first s)
+             r (rest s)]
+         (println f)
+         (apply-at (+ 800 (now)) #'print-next [r]))
+       (print-next))))
+
+(print-next)
