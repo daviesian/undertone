@@ -122,19 +122,6 @@
         aenv (env-gen (perc 0.005 amp-decay) :action FREE)]
     (* vol (sin-osc fenv (* 0.5 Math/PI)) aenv)))
 
-
-(defsynth my-overpad
-  [note 60 amp 0.7 attack 0.001 release 2]
-  (let [freq  (midicps note)
-        env   (env-gen (perc attack release) :action FREE)
-        f-env (+ freq (* 3 freq (env-gen (perc 0.012 (- release 0.1)))))
-        bfreq (/ freq 2)
-        sig   (apply +
-                     (concat (* 0.7 (sin-osc [bfreq (* 0.99 bfreq)]))
-                             (lpf (saw [freq (* freq 1.01)]) f-env)))
-        audio (* amp env sig)]
-    (out 0 (pan2  audio))))
-
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Some working sequence stuff
@@ -231,7 +218,7 @@
 
 (def piece
   {:insts {:drum #(play-inst play-drum %)
-           :pad #(play-inst my-overpad %)
+           :pad #(play-inst overpad %)
            }
    :tracks [[:pad  #'infinite-pad-track-generator]
             [:drum #'infinite-drum-track-generator]
