@@ -172,9 +172,9 @@
         | 0
         + 1
         * 2]
-        [[ | - - [| |] - - | - - + - - + - - * - - * - - | - - | - | - + - + - ]
-         ;[ | - - | - - + - - + - - * - - * - - | - - | - - | - - | - - + - ]
-         ]))
+    [[ | - - | - - | - - + - - + - - * - - * - - | - - | - | - + - + - ]
+     [ | - - | - - + - - + - - * - - * - - | - - | - - | - - | - - + - ]
+     ]))
 
 (defn chord-variations [c v]
   (let [params {:release 0.1 :attack 0.1}]
@@ -216,12 +216,11 @@
 
 (defn play-drum [n]
   (cond
-    (= n :kick) (my-kick :vol 4)
+    (= n :kick) (sample-player (sample (freesound-path 777)) :vol 3);(my-kick :vol 4)
     (= n :hat) (closed-hat)
-    (= n :snare) (do
-                   (sample-player (sample (freesound-path 26903)) :vol 0.8))
+    (= n :snare) (sample-player (sample (freesound-path 26903)) :vol 0.8)
     :else (println "urgh" n)))
-(play-drum :snare)
+(play-drum :kick)
 
 (defn play-inst [player notes]
   (when notes
@@ -254,7 +253,6 @@
                                (let [n-count      (count note)
                                      n-with-index (map (fn [n i] [n i]) note (range))]
                                  (doseq [[n i] n-with-index]
-                                   (println "here")
                                    (at (+ start-time (* i (/ beat-interval n-count))) (i-fn n))
                                    ))
                                (at start-time (i-fn note)))
