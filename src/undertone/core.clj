@@ -184,7 +184,7 @@
 
 
 (defn chord-variations [c v]
-  (let [params {:release 0.3 :attack 0.1}]
+  (let [params {:release 0.9 :attack 0.1}]
     (set (map (fn [n] (assoc params :note n))
               (get-in
                {:b3 {0 (take 2 (chord :b3 :minor))
@@ -279,7 +279,9 @@
                                                        [{:note (note :a2) :release 5 :amp 1.5}]
                                                        (repeat 5 nil)
                                                        [{:note (note :b2) :release 10 :amp 1.5}]
-                                                       (repeat 25 nil)
+                                                       (repeat 23 nil)
+                                                       [{:note (note :a2) :release 2 :amp 1.5}]
+                                                       (repeat 1 nil)
                                                        [{:note (note :b2) :release 10 :amp 1.5}]
                                                        (repeat 31 nil)
                                                        [{:note (note :d3) :release 10 :amp 1.5}]
