@@ -234,10 +234,10 @@
    :notes - a (potentially infinite) list of notes, one for
             every beat, or nil for silence.
 
-   If note is a single element, it will be played on the beat.
-   If note is a set of elements, they will be played on the beat.
-   If note is a list of elements, the beat will be split up and
-   the notes will be played with even spacing in time.
+   If note is a single element, it will be played on the beat.  If note
+   is a set of elements, they will be played on the beat.  If note is a
+   list of elements, the beat will be split up and the notes will be
+   played with even spacing in time.
 
    Completes when the end of any of the tracks is reached."
   ([bpm tracks] (play-tracks bpm tracks (now)))
