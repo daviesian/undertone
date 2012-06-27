@@ -182,6 +182,7 @@
      [ | - - | - - + - - + - - * - - * - - | - - | - - | - - | - - + - ]
      ]))
 
+
 (defn chord-variations [c v]
   (let [params {:release 0.3 :attack 0.1}]
     (set (map (fn [n] (assoc params :note n))
@@ -225,11 +226,6 @@
       (doseq [n notes] (player n))
       (player notes))))
 
-(def piece
-  [[overpad  #'infinite-pad-track-generator]
-   [drum #'infinite-drum-track-generator]])
-
-
 (defn play-tracks [bpm tracks start-time]
   "Plays a list of tracks, where each track is a tuple
    of [instrument-fn notes], where notes is a (potentially
@@ -240,29 +236,43 @@
         next-beat-time (+ start-time beat-interval)]
     ;; Generate new tracks for the recursive call.
     ;; While doing so, play the head of each track.
-    (let [new-tracks (for [[inst ns] tracks]
-                       (let [ns         (deref-if-var ns)
-                             ns         (if (fn? ns) (ns) ns)
-                             note       (first ns)
-                             rest-notes (next ns)]
+    (let [new-tracks (for [{:keys [inst notes] :as track} tracks]
+                       (let [notes         (deref-if-var notes)
+                             notes         (if (fn? notes) (notes) notes)
+                             note       (first notes)
+                             rest-notes (next notes)]
                          (if (sequential? note)
                            ;; This is a list of notes. Split this beat evenly and
                            ;; play them sequentially
                            (let [n-count      (count note)
-                                 n-with-index (map (fn [n i] [n i]) note (range))]
-                             (doseq [[n i] n-with-index]
+                                 n-with-index (map-indexed vector note)]
+                             (doseq [[i n] n-with-index]
                                (at (+ start-time (* i (/ beat-interval n-count))) (play-inst inst n))))
 
                            ;; This is either a single note or set of notes.
                            (at start-time (play-inst inst note)))
 
-                         ;; Return the rest of the track with this note removed from the head.
-                         [inst rest-notes]))]
+                         ;; Return the rest of the track with this note removed from the head of :notes.
+                         (assoc track :notes rest-notes)))]
       (dorun new-tracks)
-      (when (not-any? #(nil? (second %)) new-tracks)
+      (when (not-any? #(nil? (:notes %)) new-tracks)
         (binding [overtone.music.time/*apply-ahead* 300]
           (apply-at next-beat-time play-tracks [bpm
                                                new-tracks
                                                next-beat-time]))))))
 
-(play-tracks (* 4 130) piece (+ (now) 100))
+(def my-tracks
+  [{:inst overpad :notes #'infinite-pad-track-generator}
+   {:inst drum    :notes #'infinite-drum-track-generator}
+   {:inst overpad :notes (cycle (concat [{:note (note :b2) :release 10}]
+                                       (repeat 31 nil)
+                                       [{:note (note :a2) :release 5}]
+                                       (repeat 5 nil)
+                                       [{:note (note :b2) :release 10}]
+                                       (repeat 25 nil)
+                                       [{:note (note :b2) :release 10}]
+                                       (repeat 31 nil)
+                                       [{:note (note :d3) :release 10}]
+                                       (repeat 31 nil)))}])
+
+(play-tracks (* 4 130) my-tracks (+ (now) 100))
