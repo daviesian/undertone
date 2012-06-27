@@ -130,23 +130,11 @@
 (on-event [:midi :control-change] (fn [{controller :data1 value :data2}]
                                     (when (= 64 controller)
                                       (let [down (< 63 value)]
-                                        (compare-and-set! pedal-down (not down) down)))
-                                    ;(println "Controller" controller ":" value ":" @pedal-down)
-                                    )
+                                        (compare-and-set! pedal-down (not down) down))))
           ::control-change)
 
 
 ;; INSTS
-
-(definst my-kick
-  [freq       {:default 50 :min 40 :max 140 :step 1}
-   env-ratio  {:default 3 :min 1.2 :max 8.0 :step 0.1}
-   freq-decay {:default 0.02 :min 0.001 :max 1.0 :step 0.001}
-   amp-decay  {:default 0.5 :min 0.001 :max 1.0 :step 0.001}
-   vol        {:default 1}]
-  (let [fenv (* (env-gen (envelope [env-ratio 1] [freq-decay] :exp)) freq)
-        aenv (env-gen (perc 0.005 amp-decay) :action FREE)]
-    (* vol (sin-osc fenv (* 0.5 Math/PI)) aenv)))
 
 (defn piano-mirror [ns]
   (let [ns @current-notes]
@@ -159,11 +147,18 @@
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(defn lookup-if-var [s]
+(defn deref-if-var [s]
   (if (var? s) @s s))
 
 (defn infinite-rand-chain [variations]
-  (apply concat (repeatedly #(rand-nth (lookup-if-var variations)))))
+  (apply concat (repeatedly #(rand-nth (deref-if-var variations)))))
+
+(defn drum [n]
+  (cond
+    (= n :kick) (sample-player (sample (freesound-path 777)) :vol 3)
+    (= n :hat) (closed-hat)
+    (= n :snare) (sample-player (sample (freesound-path 26903)) :vol 0.8)
+    :else (println "Unknown drum:" n)))
 
 (defn funky-sequence []
   [#{:kick :hat}
@@ -224,13 +219,6 @@
 (defn infinite-pad-track-generator []
   (clever-mask-thing infinite-chord-track (infinite-rand-chain #'pad-timing-variations) #'chord-variations))
 
-(defn play-drum [n]
-  (cond
-    (= n :kick) (sample-player (sample (freesound-path 777)) :vol 3);(my-kick :vol 4)
-    (= n :hat) (closed-hat)
-    (= n :snare) (sample-player (sample (freesound-path 26903)) :vol 0.8)
-    :else (println "urgh" n)))
-
 (defn play-inst [player notes]
   (when notes
     (if (set? notes)
@@ -238,10 +226,8 @@
       (player notes))))
 
 (def piece
-  (let [drum play-drum
-        pad  overpad]
-    [[pad  #'infinite-pad-track-generator]
-     [drum #'infinite-drum-track-generator]]))
+  [[overpad  #'infinite-pad-track-generator]
+   [drum #'infinite-drum-track-generator]])
 
 
 (defn play-tracks [bpm tracks start-time]
@@ -255,7 +241,7 @@
     ;; Generate new tracks for the recursive call.
     ;; While doing so, play the head of each track.
     (let [new-tracks (for [[inst ns] tracks]
-                       (let [ns         (if (var? ns) @ns ns)
+                       (let [ns         (deref-if-var ns)
                              ns         (if (fn? ns) (ns) ns)
                              note       (first ns)
                              rest-notes (next ns)]
