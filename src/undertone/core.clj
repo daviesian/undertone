@@ -213,7 +213,7 @@
                    (repeat bar-len :b3)
                    (repeat bar-len :d4)))))
 
-(defn clever-dot-product-thing [s indices variations]
+(defn clever-mask-thing [s indices variations]
   (map (fn [d i]
          (when i
            (if (sequential? i)
@@ -222,9 +222,7 @@
        s indices))
 
 (defn infinite-pad-track-generator []
-  (clever-dot-product-thing infinite-chord-track (infinite-rand-chain #'pad-timing-variations) #'chord-variations))
-
-
+  (clever-mask-thing infinite-chord-track (infinite-rand-chain #'pad-timing-variations) #'chord-variations))
 
 (defn play-drum [n]
   (cond
@@ -233,47 +231,52 @@
     (= n :snare) (sample-player (sample (freesound-path 26903)) :vol 0.8)
     :else (println "urgh" n)))
 
-
 (defn play-inst [player notes]
   (when notes
     (if (set? notes)
-      (doseq [d notes]
-        (player d))
+      (doseq [n notes] (player n))
       (player notes))))
 
 (def piece
-  {:insts {:drum #(play-inst play-drum %)
-           :pad #(play-inst overpad %)
-           }
-   :tracks [[:pad  #'infinite-pad-track-generator]
-            [:drum #'infinite-drum-track-generator]
-            ]})
+  (let [drum play-drum
+        pad  overpad]
+    [[pad  #'infinite-pad-track-generator]
+     [drum #'infinite-drum-track-generator]]))
 
 
-(defn play-piece [bpm piece start-time]
+(defn play-tracks [bpm tracks start-time]
+  "Plays a list of tracks, where each track is a tuple
+   of [instrument-fn notes], where notes is a (potentially
+   infinite sequence of notes, or nil for silence.
+
+   Completes when the end of any of the tracks is reached."
   (let [beat-interval  (/ 60000 bpm)
-        next-beat-time (+ start-time beat-interval)
-        tracks         (:tracks piece)
-        insts          (:insts piece)]
+        next-beat-time (+ start-time beat-interval)]
+    ;; Generate new tracks for the recursive call.
+    ;; While doing so, play the head of each track.
     (let [new-tracks (for [[inst ns] tracks]
                        (let [ns         (if (var? ns) @ns ns)
                              ns         (if (fn? ns) (ns) ns)
-                             i-fn       (insts inst)
                              note       (first ns)
                              rest-notes (next ns)]
                          (if (sequential? note)
+                           ;; This is a list of notes. Split this beat evenly and
+                           ;; play them sequentially
                            (let [n-count      (count note)
                                  n-with-index (map (fn [n i] [n i]) note (range))]
                              (doseq [[n i] n-with-index]
-                               (at (+ start-time (* i (/ beat-interval n-count))) (i-fn n))
-                               ))
-                           (at start-time (i-fn note)))
+                               (at (+ start-time (* i (/ beat-interval n-count))) (play-inst inst n))))
+
+                           ;; This is either a single note or set of notes.
+                           (at start-time (play-inst inst note)))
+
+                         ;; Return the rest of the track with this note removed from the head.
                          [inst rest-notes]))]
       (dorun new-tracks)
       (when (not-any? #(nil? (second %)) new-tracks)
-        (binding [overtone.music.time/*apply-ahead* 10]
-          (apply-at next-beat-time play-piece [bpm
-                                               (assoc piece :tracks new-tracks)
+        (binding [overtone.music.time/*apply-ahead* 300]
+          (apply-at next-beat-time play-tracks [bpm
+                                               new-tracks
                                                next-beat-time]))))))
 
-(play-piece (* 4 130) piece (+ (now) 100))
+(play-tracks (* 4 130) piece (+ (now) 100))
