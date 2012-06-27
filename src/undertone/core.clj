@@ -226,53 +226,64 @@
       (doseq [n notes] (player n))
       (player notes))))
 
-(defn play-tracks [bpm tracks start-time]
-  "Plays a list of tracks, where each track is a tuple
-   of [instrument-fn notes], where notes is a (potentially
-   infinite sequence of notes, or nil for silence.
+(defn play-tracks
+  "Plays a list of tracks, where each track is a map containing
+   at least:
+
+   :inst  - a function that will be called for every note in
+   :notes - a (potentially infinite) list of notes, one for
+            every beat, or nil for silence.
+
+   If note is a single element, it will be played on the beat.
+   If note is a set of elements, they will be played on the beat.
+   If note is a list of elements, the beat will be split up and
+   the notes will be played with even spacing in time.
 
    Completes when the end of any of the tracks is reached."
-  (let [beat-interval  (/ 60000 bpm)
-        next-beat-time (+ start-time beat-interval)]
-    ;; Generate new tracks for the recursive call.
-    ;; While doing so, play the head of each track.
-    (let [new-tracks (for [{:keys [inst notes] :as track} tracks]
-                       (let [notes         (deref-if-var notes)
-                             notes         (if (fn? notes) (notes) notes)
-                             note       (first notes)
-                             rest-notes (next notes)]
-                         (if (sequential? note)
-                           ;; This is a list of notes. Split this beat evenly and
-                           ;; play them sequentially
-                           (let [n-count      (count note)
-                                 n-with-index (map-indexed vector note)]
-                             (doseq [[i n] n-with-index]
-                               (at (+ start-time (* i (/ beat-interval n-count))) (play-inst inst n))))
+  ([bpm tracks] (play-tracks bpm tracks (now)))
+  ([bpm tracks start-time]
+     (let [beat-interval  (/ 60000 bpm)
+           next-beat-time (+ start-time beat-interval)]
+       ;; Generate new tracks for the recursive call.
+       ;; While doing so, play the head of each track.
+       (let [new-tracks (for [{:keys [inst notes] :as track} tracks]
+                          (let [notes         (deref-if-var notes)
+                                notes         (if (fn? notes) (notes) notes)
+                                note       (first notes)
+                                rest-notes (next notes)]
+                            (if (sequential? note)
+                              ;; This is a list of notes. Split this beat evenly and
+                              ;; play them sequentially
+                              (let [n-count      (count note)
+                                    n-with-index (map-indexed vector note)]
+                                (doseq [[i n] n-with-index]
+                                  (at (+ start-time (* i (/ beat-interval n-count))) (play-inst inst n))))
 
-                           ;; This is either a single note or set of notes.
-                           (at start-time (play-inst inst note)))
+                              ;; This is either a single note or set of notes.
+                              (at start-time (play-inst inst note)))
 
-                         ;; Return the rest of the track with this note removed from the head of :notes.
-                         (assoc track :notes rest-notes)))]
-      (dorun new-tracks)
-      (when (not-any? #(nil? (:notes %)) new-tracks)
-        (binding [overtone.music.time/*apply-ahead* 300]
-          (apply-at next-beat-time play-tracks [bpm
-                                               new-tracks
-                                               next-beat-time]))))))
+                            ;; Return the rest of the track with this note removed from the head of :notes.
+                            (assoc track :notes rest-notes)))]
+         (dorun new-tracks)
+         (when (not-any? #(nil? (:notes %)) new-tracks)
+           (binding [overtone.music.time/*apply-ahead* 300]
+             (apply-at next-beat-time play-tracks [bpm
+                                                   new-tracks
+                                                   next-beat-time])))))))
 
 (def my-tracks
-  [{:inst overpad :notes #'infinite-pad-track-generator}
-   {:inst drum    :notes #'infinite-drum-track-generator}
-   {:inst overpad :notes (cycle (concat [{:note (note :b2) :release 10}]
-                                       (repeat 31 nil)
-                                       [{:note (note :a2) :release 5}]
-                                       (repeat 5 nil)
-                                       [{:note (note :b2) :release 10}]
-                                       (repeat 25 nil)
-                                       [{:note (note :b2) :release 10}]
-                                       (repeat 31 nil)
-                                       [{:note (note :d3) :release 10}]
-                                       (repeat 31 nil)))}])
+  [{:name "Chords" :inst overpad :notes #'infinite-pad-track-generator}
+   {:name "Drums"  :inst drum    :notes #'infinite-drum-track-generator}
+   {:name "Bass"   :inst overpad :notes (cycle (concat [{:note (note :b2) :release 10 :amp 1.5}]
+                                                       (repeat 31 nil)
+                                                       [{:note (note :a2) :release 5 :amp 1.5}]
+                                                       (repeat 5 nil)
+                                                       [{:note (note :b2) :release 10 :amp 1.5}]
+                                                       (repeat 25 nil)
+                                                       [{:note (note :b2) :release 10 :amp 1.5}]
+                                                       (repeat 31 nil)
+                                                       [{:note (note :d3) :release 10 :amp 1.5}]
+                                                       (repeat 31 nil)))}
+   ])
 
-(play-tracks (* 4 130) my-tracks (+ (now) 100))
+(play-tracks (* 4 130) my-tracks)
