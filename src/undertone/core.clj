@@ -3,12 +3,8 @@
         overtone.inst.synth
         overtone.inst.drum
         ;overtone.inst.sampled-piano
-        ;overtone.midi
-
         )
-  (:import (java.util Random))
-  ;(:import (javax.sound.midi Receiver Transmitter MidiSystem MidiMessage MidiDevice$Info MidiDevice))
-  )
+  (:import (java.util Random)))
 
 (demo (sin-osc))
 
@@ -78,11 +74,13 @@
 (defn echo-note [note velocity delay]
   (let [vel (* velocity 0.8)
         n (+ note 12)]
-    (after-delay delay #(
-                         (midi-note-on clav n vel)
-                         (after-delay delay (fn [] (midi-note-on clav n 0)))
-                         (when (> vel 30)
-                           (echo-note n vel delay))))))
+    (midi-note-on clav n vel)
+    (kick)
+    (comment (after-delay delay #(
+                                  (midi-note-on clav n vel)
+                                  (after-delay delay (fn [] (midi-note-on clav n 0)))
+                                  (when (> vel 30)
+                                    (echo-note n vel delay)))))))
 
 (defn intervals [notes]
   (if (< (count notes) 2)
@@ -92,23 +90,51 @@
       (map (fn [[a b]] (- b a)) pairs)
       )))
 
-(def current-notes (atom #{}))
+(def pressed-keys (atom #{}))
+(def pedal-down (atom false))
+(def sounding-notes (atom #{}))
 
-(defn notes-updated [k r old new]
-  (println "New notes: " new)
-  (println "Intervals: " (intervals new))
-  (println "Chord: " (find-chord new))
-  (println))
+(defn notes-updated [& args]
+  (let [notes @sounding-notes
+        chord (find-chord notes)]
 
-(add-watch current-notes :notes-updated #'notes-updated)
+    (println "Keys:" @pressed-keys)
+    (println "Sounding Notes:" @sounding-notes)
+    (println "Intervals: " (intervals notes))
+    (println "Chord: " chord)
+
+    (println)
+    ))
+
+(defn pedal-updated [k r old new]
+  (let [pedal-released (not new)]
+    (when pedal-released
+      (swap! sounding-notes #(set (filter (fn [n] (contains? @pressed-keys n)) %)))
+      (notes-updated))))
+
+(add-watch sounding-notes :notes-updated #'notes-updated)
+(add-watch pedal-down :pedal-updated #'pedal-updated)
 
 (on-event [:midi :note-on] (fn [{note :note}]
-                             (swap! current-notes #(conj % note)))
+                             ;(overpad {:attack 0.1 :release 0.3 :note note})
+                             (swap! pressed-keys #(conj % note))
+                             (swap! sounding-notes #(conj % note)))
           ::note-ons)
 
 (on-event [:midi :note-off] (fn [{note :note}]
-                             (swap! current-notes #(disj % note)))
+                              (swap! pressed-keys #(disj % note))
+                              (when (not @pedal-down)
+                                (swap! sounding-notes #(disj % note))))
           ::note-offs)
+
+(on-event [:midi :control-change] (fn [{controller :data1 value :data2}]
+                                    (when (= 64 controller)
+                                      (let [down (< 63 value)]
+                                        (compare-and-set! pedal-down (not down) down)))
+                                    ;(println "Controller" controller ":" value ":" @pedal-down)
+                                    )
+          ::control-change)
+
 
 ;; INSTS
 
@@ -121,6 +147,11 @@
   (let [fenv (* (env-gen (envelope [env-ratio 1] [freq-decay] :exp)) freq)
         aenv (env-gen (perc 0.005 amp-decay) :action FREE)]
     (* vol (sin-osc fenv (* 0.5 Math/PI)) aenv)))
+
+(defn piano-mirror [ns]
+  (let [ns @current-notes]
+    (doseq [n ns]
+      (overpad {:note n :attack 0.1 :release 0.2}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
@@ -164,7 +195,7 @@
      ]))
 
 (defn chord-variations [c v]
-  (let [params {:release 0.1 :attack 0.1}]
+  (let [params {:release 0.3 :attack 0.1}]
     (set (map (fn [n] (assoc params :note n))
               (get-in
                {:b3 {0 (take 2 (chord :b3 :minor))
@@ -201,13 +232,14 @@
   (clever-dot-product-thing infinite-chord-track (infinite-rand-chain #'pad-timing-variations) #'chord-variations))
 
 
+
 (defn play-drum [n]
   (cond
     (= n :kick) (sample-player (sample (freesound-path 777)) :vol 3);(my-kick :vol 4)
     (= n :hat) (closed-hat)
     (= n :snare) (sample-player (sample (freesound-path 26903)) :vol 0.8)
     :else (println "urgh" n)))
-(play-drum :kick)
+
 
 (defn play-inst [player notes]
   (when notes
@@ -236,18 +268,19 @@
                              i-fn       (insts inst)
                              note       (first ns)
                              rest-notes (next ns)]
-                             (if (sequential? note)
-                               (let [n-count      (count note)
-                                     n-with-index (map (fn [n i] [n i]) note (range))]
-                                 (doseq [[n i] n-with-index]
-                                   (at (+ start-time (* i (/ beat-interval n-count))) (i-fn n))
-                                   ))
-                               (at start-time (i-fn note)))
-                             [inst rest-notes]))]
+                         (if (sequential? note)
+                           (let [n-count      (count note)
+                                 n-with-index (map (fn [n i] [n i]) note (range))]
+                             (doseq [[n i] n-with-index]
+                               (at (+ start-time (* i (/ beat-interval n-count))) (i-fn n))
+                               ))
+                           (at start-time (i-fn note)))
+                         [inst rest-notes]))]
       (dorun new-tracks)
       (when (not-any? #(nil? (second %)) new-tracks)
-        (apply-at next-beat-time play-piece [bpm
-                                             (assoc piece :tracks new-tracks)
-                                             next-beat-time])))))
+        (binding [overtone.music.time/*apply-ahead* 10]
+          (apply-at next-beat-time play-piece [bpm
+                                               (assoc piece :tracks new-tracks)
+                                               next-beat-time]))))))
 
 (play-piece (* 4 130) piece (+ (now) 100))
