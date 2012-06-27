@@ -1,9 +1,7 @@
 (ns undertone.core
   (:use overtone.live
         overtone.inst.synth
-        overtone.inst.drum
-        ;overtone.inst.sampled-piano
-        )
+        overtone.inst.drum)
   (:import (java.util Random)))
 
 (demo (sin-osc))
@@ -82,6 +80,15 @@
                                   (when (> vel 30)
                                     (echo-note n vel delay)))))))
 
+
+(definst my-sin-inst [note 62 vel 0.9 gate 1]
+  (let [env (envelope [0 1 0] [0.1 0.1] :linear 1)]
+    (* (env-gen env gate :action FREE)
+
+       (sin-osc (midicps note))
+       vel)))
+
+
 (defn intervals [notes]
   (if (< (count notes) 2)
     #{}
@@ -92,10 +99,20 @@
 
 (def pressed-keys (atom #{}))
 (def pedal-down (atom false))
-(def sounding-notes (atom #{}))
+(def sounding-notes (atom {}))
+(def live-insts (atom {}))
+
+(defn start-inst [note vel]
+  (let [i (sampled-piano note (/ vel 128))]
+    (swap! live-insts #(assoc % note i))))
+
+(defn kill-inst [note]
+  (let [i (get @live-insts note)]
+    (node-control i [:gate 0])
+    (swap! live-insts #(dissoc % note))))
 
 (defn notes-updated [& args]
-  (let [notes @sounding-notes
+  (let [notes (keys @sounding-notes)
         chord (find-chord notes)]
 
     (println "Keys:" @pressed-keys)
@@ -109,22 +126,26 @@
 (defn pedal-updated [k r old new]
   (let [pedal-released (not new)]
     (when pedal-released
-      (swap! sounding-notes #(set (filter (fn [n] (contains? @pressed-keys n)) %)))
+      (let [dead-notes (filter #(not (contains? @pressed-keys %)) (keys @sounding-notes))]
+
+        )
+      (swap! sounding-notes #(let [dead-notes (filter (fn [x] (not (contains? @pressed-keys x))) (keys %))]
+                               (apply dissoc (cons % dead-notes))))
       (notes-updated))))
 
 (add-watch sounding-notes :notes-updated #'notes-updated)
 (add-watch pedal-down :pedal-updated #'pedal-updated)
 
-(on-event [:midi :note-on] (fn [{note :note}]
-                             ;(overpad {:attack 0.1 :release 0.3 :note note})
+(on-event [:midi :note-on] (fn [{note :note vel :velocity}]
                              (swap! pressed-keys #(conj % note))
-                             (swap! sounding-notes #(conj % note)))
+                             (swap! sounding-notes #(dissoc % note))
+                             (swap! sounding-notes #(assoc % note vel)))
           ::note-ons)
 
 (on-event [:midi :note-off] (fn [{note :note}]
                               (swap! pressed-keys #(disj % note))
                               (when (not @pedal-down)
-                                (swap! sounding-notes #(disj % note))))
+                                (swap! sounding-notes #(dissoc % note))))
           ::note-offs)
 
 (on-event [:midi :control-change] (fn [{controller :data1 value :data2}]
@@ -134,11 +155,23 @@
           ::control-change)
 
 
+(defn insts-update [k r old new]
+  (let [new-notes (filter #(not (contains? old %)) (keys new))
+        dead-notes (filter #(not (contains? new %)) (keys old))]
+    (doseq [note new-notes]
+      (start-inst note (get new note)))
+    (doseq [note dead-notes]
+      (kill-inst note))))
+
+(add-watch sounding-notes :insts-updated #'insts-update)
+(remove-watch sounding-notes :insts-updated)
+
+
 ;; INSTS
 
 (defn piano-mirror [ns]
-  (let [ns @current-notes]
-    (doseq [n ns]
+  (let [ns @sounding-notes]
+    (doseq [n (keys ns)]
       (overpad {:note n :attack 0.1 :release 0.2}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -266,13 +299,13 @@
                             (assoc track :notes rest-notes)))]
          (dorun new-tracks)
          (when (not-any? #(nil? (:notes %)) new-tracks)
-           (binding [overtone.music.time/*apply-ahead* 300]
+           (binding [overtone.music.time/*apply-ahead* 0]
              (apply-at next-beat-time play-tracks [bpm
                                                    new-tracks
                                                    next-beat-time])))))))
 
 (def my-tracks
-  [{:name "Chords" :inst overpad :notes #'infinite-pad-track-generator}
+  [{:name "Chords" :inst piano-mirror :notes #'infinite-pad-track-generator}
    {:name "Drums"  :inst drum    :notes #'infinite-drum-track-generator}
    {:name "Bass"   :inst overpad :notes (cycle (concat [{:note (note :b2) :release 10 :amp 1.5}]
                                                        (repeat 31 nil)
