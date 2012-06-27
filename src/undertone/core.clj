@@ -162,15 +162,8 @@
 (defn lookup-if-var [s]
   (if (var? s) @s s))
 
-(defonce my-rand-gen (Random. (now)))
-
-(defn my-rand-nth [coll]
-  (let [r (Random. (now))
-        c (count coll)]
-    (nth coll (.nextInt my-rand-gen c))))
-
 (defn infinite-rand-chain [variations]
-  (apply concat (repeatedly #(my-rand-nth (lookup-if-var variations)))))
+  (apply concat (repeatedly #(rand-nth (lookup-if-var variations)))))
 
 (defn funky-sequence []
   [#{:kick :hat}
