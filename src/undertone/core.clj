@@ -1,7 +1,8 @@
 (ns undertone.core
   (:use overtone.live
         overtone.inst.synth
-        overtone.inst.drum)
+        overtone.inst.drum
+        undertone.novation)
   (:import (java.util Random)))
 
 (demo (sin-osc))
@@ -63,30 +64,30 @@
 
 (on-event [:midi :note-on] (fn [{note :note velocity :velocity timestamp :timestamp}]
                              (println "Note: " note ", Velocity: " velocity ", Timestamp: " timestamp)
-                             (echo-note note velocity 150)
+                             ;(echo-note note velocity 150)
                              )
           ::echo)
 
 (remove-handler ::echo)
 
 (defn echo-note [note velocity delay]
-  (let [vel (* velocity 0.8)
+  (let [vel (* velocity 1.1)
+        vel (if (> vel 127) 127 vel)
         n (+ note 12)]
-    (midi-note-on clav n vel)
-    (kick)
-    (comment (after-delay delay #(
-                                  (midi-note-on clav n vel)
-                                  (after-delay delay (fn [] (midi-note-on clav n 0)))
-                                  (when (> vel 30)
-                                    (echo-note n vel delay)))))))
+    (after-delay delay #(
+                         (midi-note-on clav n vel)
+                         (after-delay delay (fn [] (midi-note-on clav n 0)))
+                         (when (> vel 30)
+                           (echo-note n vel delay))))))
 
 
-(definst my-sin-inst [note 62 vel 0.9 gate 1]
+(defsynth my-sin-synth [note 62 vel 0.9 gate 1]
   (let [env (envelope [0 1 0] [0.1 0.1] :linear 1)]
-    (* (env-gen env gate :action FREE)
-
-       (sin-osc (midicps note))
-       vel)))
+    (out 0
+         (pan2
+          (* (env-gen env gate :action FREE)
+             (sin-osc (* (+ 1 (* 0.05 (sin-osc 1))) (midicps note)))
+             vel)))))
 
 
 (defn intervals [notes]
@@ -103,7 +104,7 @@
 (def live-insts (atom {}))
 
 (defn start-inst [note vel]
-  (let [i (sampled-piano note (/ vel 128))]
+  (let [i (my-sin-synth note (/ vel 128))]
     (swap! live-insts #(assoc % note i))))
 
 (defn kill-inst [note]
@@ -122,7 +123,8 @@
 
     (println)
     ))
-
+(event-debug-on)
+(event-debug-off)
 (defn pedal-updated [k r old new]
   (let [pedal-released (not new)]
     (when pedal-released
@@ -322,3 +324,18 @@
    ])
 
 (play-tracks (* 4 130) my-tracks)
+
+(defn program-change [device msb lsb p]
+  (let [msg (javax.sound.midi.ShortMessage.)]
+    (.setMessage msg javax.sound.midi.ShortMessage/CONTROL_CHANGE 0 0x20 lsb)
+    (midi-send-msg (:receiver device) msg -1)
+    (.setMessage msg javax.sound.midi.ShortMessage/PROGRAM_CHANGE 0 p 0)
+    (midi-send-msg (:receiver device) msg -1)))
+
+(program-change clav 0 122 49)
+(midi-note-on clav 60 90)
+(midi-note-off clav 60)
+
+
+(add-watch (atom-for-controller 16) :strings-vol (fn [k r old new]
+                                                   (println "Strings vol:" new)))
