@@ -48,7 +48,7 @@
         rest  (rest chord-seq)
         next-time (+ time 1000)]
     (doseq [n chord]
-      (at time (sampled-piano n)))
+      (at time (ks1 n)))
     (when rest
       (apply-at next-time  play-chord-seq [rest next-time]))))
 
@@ -64,7 +64,7 @@
 
 (on-event [:midi :note-on] (fn [{note :note velocity :velocity timestamp :timestamp}]
                              (println "Note: " note ", Velocity: " velocity ", Timestamp: " timestamp)
-                             ;(echo-note note velocity 150)
+                             (echo-note note velocity 150)
                              )
           ::echo)
 
@@ -80,18 +80,32 @@
                          (when (> vel 30)
                            (echo-note n vel delay))))))
 
+(defmacro $
+  ([single]
+     (if (seq? single)
+       `($ ~@single)          ; The single form is a list. Recurse.
+       single))               ; The single form is a symbol. Leave as-is
+  ([first & more]
+     (let [[second & rest] more]
+       (cond (= first '$)
+             `(~@more) ; This is an escape from the infix notation. Leave this form as-is.
+             (= first 'clojure.core/deref)
+             `(~first ~@more)
+             :else
+             `(~second ($ ~first) ($ ~@rest)))))) ; Rewrite infix to prefix, left-to-right.
+
+
 
 (defsynth my-sin-synth [note 62 vel 0.9 gate 1]
-  (let [env (envelope [0 1 0] [0.1 0.1] :linear 1)]
-    (out 0
-         (pan2
-          (* (env-gen env gate :action FREE)
-             (sin-osc (* (+ 1 (* 0.05 (sin-osc 1))) (midicps note)))
-             vel)))))
+  (let [env        (envelope [0 1 0] [0.1 0.1] :linear 1)
+        eg         (env-gen env gate :action FREE)
+        sig        (sin-osc ($ (1 + 0.05 * ($ sin-osc 10)) * ($ midicps note)))]
+    (out 0 (pan2
+            ($ eg * sig * vel)))))
 
 
 (defn intervals [notes]
-  (if (< (count notes) 2)
+  (if ($ ($ count notes) < 2)
     #{}
     (let [sorted-notes (sort notes)
           pairs        (partition 2 (interleave sorted-notes (rest sorted-notes)))]
@@ -125,13 +139,15 @@
     ))
 (event-debug-on)
 (event-debug-off)
+
+
 (defn pedal-updated [k r old new]
   (let [pedal-released (not new)]
     (when pedal-released
-      (let [dead-notes (filter #(not (contains? @pressed-keys %)) (keys @sounding-notes))]
+      (let [dead-notes (filter #(not ($ @pressed-keys contains? %)) (keys @sounding-notes))]
 
         )
-      (swap! sounding-notes #(let [dead-notes (filter (fn [x] (not (contains? @pressed-keys x))) (keys %))]
+      (swap! sounding-notes #(let [dead-notes (filter (fn [x] (not ($ @pressed-keys contains? x))) (keys %))]
                                (apply dissoc (cons % dead-notes))))
       (notes-updated))))
 
@@ -158,8 +174,8 @@
 
 
 (defn insts-update [k r old new]
-  (let [new-notes (filter #(not (contains? old %)) (keys new))
-        dead-notes (filter #(not (contains? new %)) (keys old))]
+  (let [new-notes (filter #(not ($ old contains? %)) (keys new))
+        dead-notes (filter #(not ($ new contains? %)) (keys old))]
     (doseq [note new-notes]
       (start-inst note (get new note)))
     (doseq [note dead-notes]
@@ -200,7 +216,7 @@
    :hat
    [:hat :hat]
    :hat
-   #{:snare :hat}
+   #{:kick :snare :hat}
    :hat
    :hat
    :hat])
@@ -240,7 +256,7 @@
   (let [bar-len 32]
     (cycle (concat (repeat bar-len :b3)
                    (repeat 6 :a3)
-                   (repeat (- bar-len 6) :g3)
+                   (repeat ($ bar-len - 6) :g3)
                    (repeat bar-len :b3)
                    (repeat bar-len :d4)))))
 
@@ -277,8 +293,8 @@
    Completes when the end of any of the tracks is reached."
   ([bpm tracks] (play-tracks bpm tracks (now)))
   ([bpm tracks start-time]
-     (let [beat-interval  (/ 60000 bpm)
-           next-beat-time (+ start-time beat-interval)]
+     (let [beat-interval  ($ 60000 / bpm)
+           next-beat-time ($ start-time + beat-interval)]
        ;; Generate new tracks for the recursive call.
        ;; While doing so, play the head of each track.
        (let [new-tracks (for [{:keys [inst notes] :as track} tracks]
@@ -292,7 +308,7 @@
                               (let [n-count      (count note)
                                     n-with-index (map-indexed vector note)]
                                 (doseq [[i n] n-with-index]
-                                  (at (+ start-time (* i (/ beat-interval n-count))) (play-inst inst n))))
+                                  (at ($ start-time + (i * (beat-interval / n-count))) (play-inst inst n))))
 
                               ;; This is either a single note or set of notes.
                               (at start-time (play-inst inst note)))
@@ -307,7 +323,7 @@
                                                    next-beat-time])))))))
 
 (def my-tracks
-  [{:name "Chords" :inst piano-mirror :notes #'infinite-pad-track-generator}
+  [{:name "Chords" :inst overpad :notes #'infinite-pad-track-generator}
    {:name "Drums"  :inst drum    :notes #'infinite-drum-track-generator}
    {:name "Bass"   :inst overpad :notes (cycle (concat [{:note (note :b2) :release 10 :amp 1.5}]
                                                        (repeat 31 nil)
@@ -323,7 +339,7 @@
                                                        (repeat 31 nil)))}
    ])
 
-(play-tracks (* 4 130) my-tracks)
+(play-tracks ($ 4 * 130) my-tracks)
 
 (defn program-change [device msb lsb p]
   (let [msg (javax.sound.midi.ShortMessage.)]
@@ -335,7 +351,7 @@
 (program-change clav 0 122 49)
 (midi-note-on clav 60 90)
 (midi-note-off clav 60)
-
+(program-change clav 0 122 0)
 
 (add-watch (atom-for-controller 16) :strings-vol (fn [k r old new]
                                                    (println "Strings vol:" new)))

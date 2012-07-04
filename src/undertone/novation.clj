@@ -28,7 +28,7 @@
     (novation-send-sysex msg)))
 
 
-(do
+(when (get-novation-device)
   (novation-clear-screen :left)
   (novation-clear-screen :right)
   (novation-send-text :right :top 20 "Look! I can write to the screen!"))
