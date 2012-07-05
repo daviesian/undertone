@@ -7,11 +7,25 @@
 
 (demo (sin-osc))
 
+(defmacro $
+  ([single]
+     (if (seq? single)
+       `($ ~@single)          ; The single form is a list. Recurse.
+       single))               ; The single form is a symbol. Leave as-is
+  ([first & more]
+     (let [[second & rest] more]
+       (cond (= first '$)
+             `(~@more) ; This is an escape from the infix notation. Leave this form as-is.
+             (= first 'clojure.core/deref)
+             `(~first ~@more)
+             :else             ; Rewrite infix to prefix, left-to-right.
+             `(~second ($ ~first) ($ ~@rest))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Here's some initial experiments with playing sequences
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
 
 (defn play-seq-at [notes synth interval time]
   (let [note            (first notes)
@@ -54,6 +68,7 @@
 
 (play-chord-seq (cycle [C Am F G]) (+ 100 (now)))
 
+(stop)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Some MIDI Stuff
@@ -61,6 +76,16 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (def clav (midi-out "Clavinova"))
+
+(defn echo-note [note velocity delay]
+  (let [vel ($ velocity * 1.1)
+        vel (if ($ vel > 127) 127 vel)
+        n   ($ note + 12)]
+    (after-delay delay #(
+                         (midi-note-on clav n vel)
+                         (after-delay delay (fn [] (midi-note-on clav n 0)))
+                         (when ($ vel > 30)
+                           (echo-note n vel delay))))))
 
 (on-event [:midi :note-on] (fn [{note :note velocity :velocity timestamp :timestamp}]
                              (println "Note: " note ", Velocity: " velocity ", Timestamp: " timestamp)
@@ -70,29 +95,7 @@
 
 (remove-handler ::echo)
 
-(defn echo-note [note velocity delay]
-  (let [vel (* velocity 1.1)
-        vel (if (> vel 127) 127 vel)
-        n (+ note 12)]
-    (after-delay delay #(
-                         (midi-note-on clav n vel)
-                         (after-delay delay (fn [] (midi-note-on clav n 0)))
-                         (when (> vel 30)
-                           (echo-note n vel delay))))))
 
-(defmacro $
-  ([single]
-     (if (seq? single)
-       `($ ~@single)          ; The single form is a list. Recurse.
-       single))               ; The single form is a symbol. Leave as-is
-  ([first & more]
-     (let [[second & rest] more]
-       (cond (= first '$)
-             `(~@more) ; This is an escape from the infix notation. Leave this form as-is.
-             (= first 'clojure.core/deref)
-             `(~first ~@more)
-             :else
-             `(~second ($ ~first) ($ ~@rest)))))) ; Rewrite infix to prefix, left-to-right.
 
 
 
@@ -144,9 +147,6 @@
 (defn pedal-updated [k r old new]
   (let [pedal-released (not new)]
     (when pedal-released
-      (let [dead-notes (filter #(not ($ @pressed-keys contains? %)) (keys @sounding-notes))]
-
-        )
       (swap! sounding-notes #(let [dead-notes (filter (fn [x] (not ($ @pressed-keys contains? x))) (keys %))]
                                (apply dissoc (cons % dead-notes))))
       (notes-updated))))
@@ -231,6 +231,8 @@
         * 2]
     [[ | - - | - - | - - + - - + - - * - - * - - | - - | - | - + - + - ]
      [ | - - | - - + - - + - - * - - * - - | - - | - - | - - | - - + - ]
+     [ | - - | - - | - + - + - * - * - - - * - - * - - | - - | - - + - ]
+     [ | - - | - - | - - + - - * - * - | - - | - - | - - | - - | - + - ]
      ]))
 
 
