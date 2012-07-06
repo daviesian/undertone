@@ -140,8 +140,6 @@
 
     (println)
     ))
-(event-debug-on)
-(event-debug-off)
 
 
 (defn pedal-updated [k r old new]
@@ -183,8 +181,8 @@
 
 (add-watch sounding-notes :insts-updated #'insts-update)
 (remove-watch sounding-notes :insts-updated)
-
-
+(remove-watch sounding-notes :notes-updated)
+(remove-watch pedal-down :pedal-updated)
 ;; INSTS
 
 (defn piano-mirror [ns]
@@ -231,10 +229,9 @@
         * 2]
     [[ | - - | - - | - - + - - + - - * - - * - - | - - | - | - + - + - ]
      [ | - - | - - + - - + - - * - - * - - | - - | - - | - - | - - + - ]
-     [ | - - | - - | - + - + - * - * - - - * - - * - - | - - | - - + - ]
+     [ | - - | - - | - + - + - * - - * - - * - - * - - | - - | - - + - ]
      [ | - - | - - | - - + - - * - * - | - - | - - | - - | - - | - + - ]
      ]))
-
 
 (defn chord-variations [c v]
   (let [params {:release 0.9 :attack 0.1}]
@@ -350,10 +347,11 @@
     (.setMessage msg javax.sound.midi.ShortMessage/PROGRAM_CHANGE 0 p 0)
     (midi-send-msg (:receiver device) msg -1)))
 
-(program-change clav 0 122 49)
-(midi-note-on clav 60 90)
-(midi-note-off clav 60)
-(program-change clav 0 122 0)
+;(program-change clav 0 122 49)
+;(midi-note-on clav 60 90)
+;(midi-note-off clav 60)
+;(program-change clav 0 122 0)
+
 
 (add-watch (atom-for-controller 16) :strings-vol (fn [k r old new]
                                                    (println "Strings vol:" new)))
