@@ -1,8 +1,9 @@
 (ns undertone.core
   (:use overtone.live
-        overtone.inst.synth
-        overtone.inst.drum
-        undertone.novation)
+        undertone.clavinova
+        undertone.novation
+        undertone.synth
+        )
   (:import (java.util Random)))
 
 (demo (sin-osc))
@@ -20,62 +21,12 @@
              `(~first ~@more)
              :else             ; Rewrite infix to prefix, left-to-right.
              `(~second ($ ~first) ($ ~@rest))))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;
-;; Here's some initial experiments with playing sequences
-;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-
-(defn play-seq-at [notes synth interval time]
-  (let [note            (first notes)
-        remaining-notes (rest notes)
-        next-time       (+ time interval)]
-    (at time (synth note))
-        (apply-at next-time play-seq-at [remaining-notes synth interval next-time])))
-
-(defn play-seq [notes synth interval]
-  (play-seq-at notes synth interval (+ 100 (now))))
-
-
-(defn cycle-seq [notes synth interval]
-  (play-seq (cycle notes) synth interval))
-
-(let [start-time (+ (now) 100)]
-  (play-seq-at (cycle [1]) closed-hat 400 start-time)
-  (play-seq-at (cycle [62]) ks1 300 start-time))
-
-(cycle-seq (chord :d3 :major) ks1 100)
-
-(def C (chord :c4 :major))
-(def Am (chord :a3 :minor))
-(def F (chord :f3 :major))
-(def G (chord :g3 :major))
-
-(def chord-seq {1 C
-                2 G
-                3 Am
-                4 F})
-
-(defn play-chord-seq [chord-seq time]
-  (let [chord (first chord-seq)
-        rest  (rest chord-seq)
-        next-time (+ time 1000)]
-    (doseq [n chord]
-      (at time (ks1 n)))
-    (when rest
-      (apply-at next-time  play-chord-seq [rest next-time]))))
-
-(play-chord-seq (cycle [C Am F G]) (+ 100 (now)))
-
-(stop)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Some MIDI Stuff
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(def clav (midi-out "Clavinova"))
 
 (defn echo-note [note velocity delay]
   (let [vel ($ velocity * 1.1)
@@ -115,9 +66,6 @@
       (map (fn [[a b]] (- b a)) pairs)
       )))
 
-(def pressed-keys (atom #{}))
-(def pedal-down (atom false))
-(def sounding-notes (atom {}))
 (def live-insts (atom {}))
 
 (defn start-inst [note vel]
@@ -141,36 +89,6 @@
     (println)
     ))
 
-
-(defn pedal-updated [k r old new]
-  (let [pedal-released (not new)]
-    (when pedal-released
-      (swap! sounding-notes #(let [dead-notes (filter (fn [x] (not ($ @pressed-keys contains? x))) (keys %))]
-                               (apply dissoc (cons % dead-notes))))
-      (notes-updated))))
-
-(add-watch sounding-notes :notes-updated #'notes-updated)
-(add-watch pedal-down :pedal-updated #'pedal-updated)
-
-(on-event [:midi :note-on] (fn [{note :note vel :velocity}]
-                             (swap! pressed-keys #(conj % note))
-                             (swap! sounding-notes #(dissoc % note))
-                             (swap! sounding-notes #(assoc % note vel)))
-          ::note-ons)
-
-(on-event [:midi :note-off] (fn [{note :note}]
-                              (swap! pressed-keys #(disj % note))
-                              (when (not @pedal-down)
-                                (swap! sounding-notes #(dissoc % note))))
-          ::note-offs)
-
-(on-event [:midi :control-change] (fn [{controller :data1 value :data2}]
-                                    (when (= 64 controller)
-                                      (let [down (< 63 value)]
-                                        (compare-and-set! pedal-down (not down) down))))
-          ::control-change)
-
-
 (defn insts-update [k r old new]
   (let [new-notes (filter #(not ($ old contains? %)) (keys new))
         dead-notes (filter #(not ($ new contains? %)) (keys old))]
@@ -179,22 +97,57 @@
     (doseq [note dead-notes]
       (kill-inst note))))
 
+(add-watch sounding-notes :notes-updated #'notes-updated)
 (add-watch sounding-notes :insts-updated #'insts-update)
-(remove-watch sounding-notes :insts-updated)
+
 (remove-watch sounding-notes :notes-updated)
-(remove-watch pedal-down :pedal-updated)
+(remove-watch sounding-notes :insts-updated)
+
+
+(defn mixer-notes-updated [k r old new]
+  (let [new-notes (filter #(not (contains? old %)) (keys new))
+        old-notes (filter #(not (contains? new %)) (keys old))
+        channels  2]
+    (doall (for [n old-notes
+                 i (range channels)]
+             (do
+               (midi-note-off clav n (+ 2 i)))))
+    (doall (for [n new-notes
+                 i (range channels)]
+             (do
+               (midi-note-on clav n 90 (+ 2 i))
+               )))))
+
+
+(midi-program-change clav {2 (clav-patches :strings)
+                           3 (clav-patches :choir)})
+
+(add-watch (atom-for-controller 16) :midi-vol (fn [k r old new]
+                                                  (midi-control clav 0x07 new 2)))
+
+(add-watch (atom-for-controller 17) :midi-vol (fn [k r old new]
+                                                  (midi-control clav 0x07 new 3)))
+
+(remove-watch (atom-for-controller 16) :midi-vol)
+(remove-watch (atom-for-controller 17) :midi-vol)
+
+(add-watch sounding-notes :mixer-notes-updated #'mixer-notes-updated)
+(remove-watch sounding-notes :mixer-notes-updated)
 ;; INSTS
 
 (defn piano-mirror [ns]
   (let [ns @sounding-notes]
     (doseq [n (keys ns)]
-      (overpad {:note n :attack 0.1 :release 0.2}))))
+      (my-overpad {:note n :attack 0.1 :release 0.2}))))
 
+(stop)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Some working sequence stuff
 ;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(def ^{:dynamic true} *out-bus* 0)
 
 (defn deref-if-var [s]
   (if (var? s) @s s))
@@ -204,9 +157,9 @@
 
 (defn drum [n]
   (cond
-    (= n :kick) (sample-player (sample (freesound-path 777)) :vol 3)
-    (= n :hat) (closed-hat)
-    (= n :snare) (sample-player (sample (freesound-path 26903)) :vol 0.8)
+    (= n :kick) (my-sample-player (sample (freesound-path 777)) :vol 3 :bus *out-bus*)
+    (= n :hat) (my-closed-hat :bus *out-bus*)
+    (= n :snare) (my-sample-player (sample (freesound-path 26903)) :vol 0.8 :bus *out-bus*)
     :else (println "Unknown drum:" n)))
 
 (defn funky-sequence []
@@ -270,6 +223,17 @@
 (defn infinite-pad-track-generator []
   (clever-mask-thing infinite-chord-track (infinite-rand-chain #'pad-timing-variations) #'chord-variations))
 
+(defn my-midi-player [params]
+  (let [len      (or (:sustain params) 0.5)
+        note     (:note params)
+        velocity (or (:velocity params) 90)
+        device   (:device params)
+        channel  (or (:channel params) 0)]
+    (midi-note-on device note velocity channel)
+    (after-delay (* 1000 len) #(midi-note-off device note channel))))
+
+;(my-midi-player {:device clav :note 40})
+
 (defn play-inst [player notes]
   (when notes
     (if (set? notes)
@@ -290,27 +254,29 @@
    played with even spacing in time.
 
    Completes when the end of any of the tracks is reached."
-  ([bpm tracks] (play-tracks bpm tracks (now)))
-  ([bpm tracks start-time]
+  ([bpm mixer tracks] (play-tracks bpm mixer tracks (now)))
+  ([bpm mixer tracks start-time]
      (let [beat-interval  ($ 60000 / bpm)
            next-beat-time ($ start-time + beat-interval)]
        ;; Generate new tracks for the recursive call.
        ;; While doing so, play the head of each track.
-       (let [new-tracks (for [{:keys [inst notes] :as track} tracks]
-                          (let [notes         (deref-if-var notes)
-                                notes         (if (fn? notes) (notes) notes)
-                                note       (first notes)
-                                rest-notes (next notes)]
-                            (if (sequential? note)
-                              ;; This is a list of notes. Split this beat evenly and
-                              ;; play them sequentially
-                              (let [n-count      (count note)
-                                    n-with-index (map-indexed vector note)]
-                                (doseq [[i n] n-with-index]
-                                  (at ($ start-time + (i * (beat-interval / n-count))) (play-inst inst n))))
+       (let [new-tracks (for [[track-num {:keys [inst notes mixer-track] :as track}] (map-indexed vector tracks)]
+                          (let [notes       (deref-if-var notes)
+                                notes       (if (fn? notes) (notes) notes)
+                                note        (first notes)
+                                rest-notes  (next notes)
+                                mixer-track (or mixer-track track-num)]
+                            (binding [*out-bus* (:bus (nth (:tracks mixer) mixer-track))]
+                              (if (sequential? note)
+                                ;; This is a list of notes. Split this beat evenly and
+                                ;; play them sequentially
+                                (let [n-count      (count note)
+                                      n-with-index (map-indexed vector note)]
+                                  (doseq [[i n] n-with-index]
+                                    (at ($ start-time + (i * (beat-interval / n-count))) (play-inst inst n))))
 
-                              ;; This is either a single note or set of notes.
-                              (at start-time (play-inst inst note)))
+                                ;; This is either a single note or set of notes.
+                                (at start-time (play-inst inst note))))
 
                             ;; Return the rest of the track with this note removed from the head of :notes.
                             (assoc track :notes rest-notes)))]
@@ -318,40 +284,77 @@
          (when (not-any? #(nil? (:notes %)) new-tracks)
            (binding [overtone.music.time/*apply-ahead* 0]
              (apply-at next-beat-time play-tracks [bpm
+                                                   mixer
                                                    new-tracks
                                                    next-beat-time])))))))
 
+
+
 (def my-tracks
-  [{:name "Chords" :inst overpad :notes #'infinite-pad-track-generator}
+  [{:name "Chords" :inst #(play-synth-with-bus *out-bus* my-overpad %) :notes #'infinite-pad-track-generator}
    {:name "Drums"  :inst drum    :notes #'infinite-drum-track-generator}
-   {:name "Bass"   :inst overpad :notes (cycle (concat [{:note (note :b2) :release 10 :amp 1.5}]
-                                                       (repeat 31 nil)
-                                                       [{:note (note :a2) :release 5 :amp 1.5}]
-                                                       (repeat 5 nil)
-                                                       [{:note (note :b2) :release 10 :amp 1.5}]
-                                                       (repeat 23 nil)
-                                                       [{:note (note :a2) :release 2 :amp 1.5}]
-                                                       (repeat 1 nil)
-                                                       [{:note (note :b2) :release 10 :amp 1.5}]
-                                                       (repeat 31 nil)
-                                                       [{:note (note :d3) :release 10 :amp 1.5}]
-                                                       (repeat 31 nil)))}
+   {:name "Bass"   :inst #(play-synth-with-bus *out-bus* my-overpad %) :notes (cycle (concat [{:note (note :b2) :release 10 :amp 1.5}]
+                                                                                             (repeat 31 nil)
+                                                                                             [{:note (note :a2) :release 5 :amp 1.5}]
+                                                                                             (repeat 5 nil)
+                                                                                             [{:note (note :b2) :release 10 :amp 1.5}]
+                                                                                             (repeat 23 nil)
+                                                                                             [{:note (note :a2) :release 2 :amp 1.5}]
+                                                                                             (repeat 1 nil)
+                                                                                             [{:note (note :b2) :release 10 :amp 1.5}]
+                                                                                             (repeat 31 nil)
+                                                                                             [{:note (note :d3) :release 10 :amp 1.5}]
+                                                                                             (repeat 31 nil)))}
+   {:name "Piano Bass" :inst #(my-midi-player (assoc % :device clav)) :notes (cycle (concat [{:note (note :b2) :sustain 5}]
+                                                                                             (repeat 31 nil)
+                                                                                             [{:note (note :a2) :sustain 1}]
+                                                                                             (repeat 5 nil)
+                                                                                             [{:note (note :b2) :sustain 4}]
+                                                                                             (repeat 23 nil)
+                                                                                             [{:note (note :a2) :sustain 1}]
+                                                                                             (repeat 1 nil)
+                                                                                             [{:note (note :b2) :sustain 5}]
+                                                                                             (repeat 31 nil)
+                                                                                             [{:note (note :d3) :sustain 5}]
+                                                                                             (repeat 31 nil)))}
    ])
 
-(play-tracks ($ 4 * 130) my-tracks)
-
-(defn program-change [device msb lsb p]
-  (let [msg (javax.sound.midi.ShortMessage.)]
-    (.setMessage msg javax.sound.midi.ShortMessage/CONTROL_CHANGE 0 0x20 lsb)
-    (midi-send-msg (:receiver device) msg -1)
-    (.setMessage msg javax.sound.midi.ShortMessage/PROGRAM_CHANGE 0 p 0)
-    (midi-send-msg (:receiver device) msg -1)))
-
-;(program-change clav 0 122 49)
-;(midi-note-on clav 60 90)
-;(midi-note-off clav 60)
-;(program-change clav 0 122 0)
 
 
-(add-watch (atom-for-controller 16) :strings-vol (fn [k r old new]
-                                                   (println "Strings vol:" new)))
+
+
+;(print-next-control-input)
+
+(defsynth bus-out
+  [src-bus 80 vol 1]
+  (out 0 (* vol (in src-bus 2)) ))
+
+(defn create-mixer [num-channels]
+  (let [mixer-group (group "Multi-Track Mixer")
+        start-bus 80]
+    {:group mixer-group
+     :tracks
+     (doall (map #(let [src-bus (+ start-bus (* 2 %))
+                        s (bus-out :src-bus src-bus)]
+                    (group-append-node mixer-group s)
+                    {:node s
+                     :bus src-bus})
+                 (range num-channels)))}))
+
+(defn midi-ctl-mixer-tracks [mixer param f & ctlrs]
+  (doseq [[{n :node} c] (map vector (:tracks mixer) ctlrs)]
+    (let [atom (atom-for-controller c)]
+      (add-watch atom atom (fn [k r old new]
+                             (ctl n param (f new)))))))
+
+(when (resolve 'mixer)
+  (kill (:group @(resolve 'mixer))))
+(def mixer (create-mixer 8))
+
+(midi-ctl-mixer-tracks mixer :vol #(/ % 127) 16 17 18)
+(add-watch (atom-for-controller 19) :midi-vol (fn [k r old new]
+                                                (clav-vol clav 0 new)))
+;mixer
+
+(midi-program-change clav 0 {:msb 0 :lsb 122 :patch 33})
+(play-tracks ($ 4 * 130) mixer my-tracks)
