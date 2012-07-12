@@ -33,17 +33,6 @@
   (novation-clear-screen :right)
   (novation-send-text :right :top 20 "Look! I can write to the screen!"))
 
-(defn string-contains? [string pattern]
-  (> (.indexOf string pattern) -1))
-
-(def print-next-control-input? (atom false))
-(defn print-next-control-input []
-  (reset! print-next-control-input? true))
-
-(defmacro only-for-device [msg name & body]
-  `(when (string-contains? (get-in ~msg [:device :name]) ~name)
-    ~@body)
-  )
 
 (on-event [:midi :note-on] (fn [{note :note vel :velocity :as msg}]
                              (only-for-device msg DEVICE-NAME
@@ -62,27 +51,6 @@
           :novation-note-on)
 
 
-(def controller-atoms (atom {}))
-(on-event [:midi :control-change] (fn [msg]
-                                    (when (string-contains? (get-in msg [:device :name]) DEVICE-NAME )
-                                      (let [{controller :data1 val :data2} msg
-                                            ctl-atom                       (get @controller-atoms controller)]
-                                        (when ctl-atom
-                                          (swap! ctl-atom (fn [old-val] val)))
-                                        (when @print-next-control-input?
-                                          (println "Controller" controller "Value" val ctl-atom)
-                                          (reset! print-next-control-input? false))
-                                        )))
-          :novation-control-change)
-
-
-
-(defn atom-for-controller [controller]
-  (get (swap! controller-atoms #(if (contains? % controller)
-                                   %
-                                   (assoc % controller (atom 0))))
-       controller)
-  )
 (add-watch (atom-for-controller 74) :stop-button (fn [k r old new]
                                                    (when (= 1 new)
                                                      (stop)
@@ -96,16 +64,6 @@
 
 (defsynth boring-synth [freq 440 vol 1]
   (out 0 (pan2 (* vol (sin-osc freq)))))
-
-(defn control-synth-param
-  ([controller key synth param]
-     (control-synth-param controller key synth param 0 1))
-  ([controller key synth param min max]
-     (let [a (atom-for-controller controller)]
-       (ctl synth param (scale-range @a 0 127 min max))
-       (add-watch a key (fn [k r old new]
-                          (ctl synth param (scale-range new 0 127 min max)))))
-     synth))
 
 
 (print-next-control-input)

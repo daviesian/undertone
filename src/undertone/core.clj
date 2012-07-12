@@ -22,6 +22,8 @@
              :else             ; Rewrite infix to prefix, left-to-right.
              `(~second ($ ~first) ($ ~@rest))))))
 
+
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;
 ;; Some MIDI Stuff
@@ -119,7 +121,7 @@
                )))))
 
 
-(midi-program-change clav {2 (clav-patches :strings)
+#_(midi-program-change clav {2 (clav-patches :strings)
                            3 (clav-patches :choir)})
 
 (add-watch (atom-for-controller 16) :midi-vol (fn [k r old new]
@@ -305,7 +307,7 @@
                                                                                              (repeat 31 nil)
                                                                                              [{:note (note :d3) :release 10 :amp 1.5}]
                                                                                              (repeat 31 nil)))}
-   {:name "Piano Bass" :inst #(my-midi-player (assoc % :device clav)) :notes (cycle (concat [{:note (note :b2) :sustain 5}]
+   #_{:name "Piano Bass" :inst #(my-midi-player (assoc % :device clav)) :notes (cycle (concat [{:note (note :b2) :sustain 5}]
                                                                                              (repeat 31 nil)
                                                                                              [{:note (note :a2) :sustain 1}]
                                                                                              (repeat 5 nil)
@@ -356,5 +358,5 @@
                                                 (clav-vol clav 0 new)))
 ;mixer
 
-(midi-program-change clav 0 {:msb 0 :lsb 122 :patch 33})
+#_(midi-program-change clav 0 {:msb 0 :lsb 122 :patch 33})
 (play-tracks ($ 4 * 130) mixer my-tracks)

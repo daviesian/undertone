@@ -1,36 +1,8 @@
 (ns undertone.clavinova
-  (:use overtone.core))
+  (:use overtone.core
+        undertone.midi))
 
 (def clav (midi-out "Clavinova"))
-
-(defn midi-all-notes-off
-  ([device]
-     (doseq [c (range 15)]
-       (midi-all-notes-off device c)))
-  ([device channel]
-     (let [msg (javax.sound.midi.ShortMessage.)]
-       (.setMessage msg javax.sound.midi.ShortMessage/CONTROL_CHANGE channel 0x7b 0)
-       (midi-send-msg (:receiver device) msg -1))))
-
-
-
-(defn midi-program-change
-  ([device channel-programs]
-     (doseq [[c p] channel-programs]
-       (println c p)
-       (midi-program-change device c p)))
-  ([device channel program]
-     (midi-program-change device channel (or (:msb program) 0) (or (:lsb program) 0) (:patch program)
-                          ))
-  ([device channel msb lsb patch]
-     (let [msg (javax.sound.midi.ShortMessage.)]
-       (.setMessage msg javax.sound.midi.ShortMessage/CONTROL_CHANGE channel 0x00 msb)
-       (midi-send-msg (:receiver device) msg -1)
-       (.setMessage msg javax.sound.midi.ShortMessage/CONTROL_CHANGE channel 0x20 lsb)
-       (midi-send-msg (:receiver device) msg -1)
-       (.setMessage msg javax.sound.midi.ShortMessage/PROGRAM_CHANGE channel patch 0)
-       (midi-send-msg (:receiver device) msg -1))))
-
 
 (defn clav-vol [device channel vol]
   (midi-control device 0x07 vol))
@@ -79,17 +51,13 @@
    :e-bass-var        {:lsb 122 :patch 35}
    })
 
-(midi-program-change clav 0 (clav-patches :strings))
+;(midi-program-change clav 0 (clav-patches :strings))
 
 
 ;(midi-program-change clav 0 122 49)
 ;(midi-note-on clav 60 90)
 ;(midi-note-off clav 60)
 ;(midi-program-change clav 0 122 0)
-
-(on-event :reset (fn [e]
-                     (midi-all-notes-off clav))
-          ::midi-killer)
 
 
 (def pressed-keys (atom #{}))
