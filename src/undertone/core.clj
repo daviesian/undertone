@@ -3,6 +3,7 @@
         undertone.clavinova
         undertone.novation
         undertone.synth
+        undertone.midi
         )
   (:import (java.util Random)))
 
@@ -323,10 +324,6 @@
 
 
 
-
-
-;(print-next-control-input)
-
 (defsynth bus-out
   [src-bus 80 vol 1]
   (out 0 (* vol (in src-bus 2)) ))
@@ -345,12 +342,11 @@
 
 (defn midi-ctl-mixer-tracks [mixer param f & ctlrs]
   (doseq [[{n :node} c] (map vector (:tracks mixer) ctlrs)]
-    (let [atom (atom-for-controller c)]
-      (add-watch atom atom (fn [k r old new]
-                             (ctl n param (f new)))))))
+    (on-controller-change c #(ctl n param (f %)))))
 
 (when (resolve 'mixer)
   (kill (:group @(resolve 'mixer))))
+
 (def mixer (create-mixer 8))
 
 (midi-ctl-mixer-tracks mixer :vol #(/ % 127) 16 17 18)

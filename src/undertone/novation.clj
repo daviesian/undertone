@@ -1,5 +1,6 @@
 (ns undertone.novation
   (:use overtone.live
+        undertone.midi
         overtone.inst.drum))
 
 (def DEVICE-NAME "ReMOTE ZeRO SL")

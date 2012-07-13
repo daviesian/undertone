@@ -41,7 +41,7 @@
   `(when (string-contains? (get-in ~midi-msg [:device :name]) ~device-name)
     ~@body))
 
-(def controller-atoms (atom {}))
+(defonce controller-atoms (atom {}))
 
 (def print-next-control-input? (atom false))
 (defn print-next-control-input []
@@ -74,12 +74,31 @@
                    :oneshot-next-controller)
     @controller))
 
+(defn on-controller-change [& clauses]
+  (when clauses
+    (let [c  (first clauses)
+          fun (if (next clauses)
+               (second clauses)
+               (throw (IllegalArgumentException. "on-controller-change requires an even number of clauses")))
+          a  (atom-for-controller c)]
+      (if fun
+        (do
+          (fun @a)
+          (add-watch a a (fn [k r old new]
+                           (fun new))))
+        (remove-watch a a)))
+    (apply on-controller-change (next (next clauses)))))
+
+#_(on-controller-change
+  16 #(println "New something" %)
+  17 #(println "New something-else" %)
+  18 #(println "New something-else2" %))
+
 (defn control-synth-param
   ([controller key synth param]
      (control-synth-param controller key synth param 0 1))
   ([controller key synth param min max]
-     (let [a (atom-for-controller controller)]
-       (ctl synth param (scale-range @a 0 127 min max))
-       (add-watch a key (fn [k r old new]
-                          (ctl synth param (scale-range new 0 127 min max)))))
+     (on-controller-change
+       controller
+       #(ctl synth param (scale-range % 0 127 min max)))
      synth))

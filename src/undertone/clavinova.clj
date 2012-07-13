@@ -84,8 +84,5 @@
                                 (swap! sounding-notes #(dissoc % note))))
           ::note-offs)
 
-(on-event [:midi :control-change] (fn [{controller :data1 value :data2}]
-                                    (when (= 64 controller)
-                                      (let [down (< 63 value)]
-                                        (compare-and-set! pedal-down (not down) down))))
-          ::control-change)
+(on-controller-change 64 #(let [down (< 63 %)]
+                            (compare-and-set! pedal-down (not down) down)))
