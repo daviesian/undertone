@@ -32,7 +32,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn echo-note [note velocity delay]
-  (let [vel ($ velocity * 1.1)
+  (let [vel ($ velocity * ($ scale-range   42  0 127 0.5 1.5))
         vel (if ($ vel > 127) 127 vel)
         n   ($ note + 12)]
     (after-delay delay #(
@@ -356,3 +356,5 @@
 
 #_(midi-program-change clav 0 {:msb 0 :lsb 122 :patch 33})
 (play-tracks ($ 4 * 130) mixer my-tracks)
+
+(volume (/    26   64))

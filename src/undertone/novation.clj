@@ -35,7 +35,7 @@
   (novation-send-text :right :top 20 "Look! I can write to the screen!"))
 
 
-(on-event [:midi :note-on] (fn [{note :note vel :velocity :as msg}]
+(on-event [:midi :note-on] (bound-fn [{note :note vel :velocity :as msg}]
                              (only-for-device msg DEVICE-NAME
                                (println "Note" note "Vel" vel)
                                (case note
