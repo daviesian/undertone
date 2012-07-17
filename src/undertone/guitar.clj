@@ -2,7 +2,8 @@
   (:use overtone.live))
 
 (definst guitar []
-  (sound-in 1))
+  (+ (* 10 (sound-in 1))
+   (* 3 (sound-in 0))))
 
 (guitar)
 (clear-fx guitar)

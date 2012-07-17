@@ -357,4 +357,4 @@
 #_(midi-program-change clav 0 {:msb 0 :lsb 122 :patch 33})
 (play-tracks ($ 4 * 130) mixer my-tracks)
 
-(volume (/    26   64))
+(volume 1)

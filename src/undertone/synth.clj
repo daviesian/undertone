@@ -21,14 +21,28 @@
         ]
     (out 0 (pan2 sig))))
 
-;(def s (filter-test))
+(def s (filter-test))
 
-;(stop)
+(stop)
 
-#_(add-watch (atom-for-controller 8) :fc (fn [k r old new]
-                                         (ctl s :lc (midi-val-to-freq new 100 1000))))
-#_(add-watch (atom-for-controller 9) :fc (fn [k r old new]
-                                         (ctl s :q (/ new 256))))
+(ctl s :lc (midi-val-to-freq  30.0  100 10000))
+(ctl s :q  0.33464566 )
+
+
+(defsynth env-test [a 0.1 d 0.1 s 0.2 r 0.1 gate 1]
+  (let [e   (env-gen (adsr a d s r) gate 1 0 1 FREE)
+        sig (* e (lpf (saw) (* 4 440)))]
+    (out 0 sig)
+    ))
+
+adsr
+
+
+(let [s (env-test 0.1 0.2  0.2 0.1)]
+  (Thread/sleep 1000)
+  (ctl s :gate 0))
+
+
 
 (defsynth my-mono-player
   "Plays a single channel audio buffer."
